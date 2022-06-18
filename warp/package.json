@@ -1,0 +1,10 @@
+{
+  "name": "warp",
+  "version": "1.0.0",
+  "main": "index.js",
+  "license": "MIT",
+  "type": "module",
+  "dependencies": {
+    "arweave": "^1.11.4"
+  }
+}
