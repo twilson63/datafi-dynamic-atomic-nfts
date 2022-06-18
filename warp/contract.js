@@ -1,10 +1,23 @@
-const functions = { balance, transfer }
+const functions = { balance, transfer, visits, visit }
 
 export function handle(state, action) {
   if (Object.keys(functions).includes(action.input.function)) {
     return functions[action.input.function](state, action)
   }
   return ContractError('function not defined!')
+}
+
+function visits(state, action) {
+  return { result: state.visits.length }
+}
+
+function visit(state, action) {
+  const { caller } = action
+
+  if (!state.visits.includes(caller)) {
+    state.visits = [...state.visits, caller]
+  }
+  return { state }
 }
 
 function balance(state, action) {
