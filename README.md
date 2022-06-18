@@ -109,6 +109,84 @@ Currently the project is configured to mint just the `svg` file that is located 
 warp/mint.js
 
 ``` js
+import Arweave from 'arweave'
+import fs from 'fs'
+
+const arweave = Arweave.init({
+  port: 1984,
+})
+
+const jwk = JSON.parse(fs.readFileSync('wallet.json', 'utf-8'))
+const addr = await arweave.wallets.jwkToAddress(jwk)
+const src = fs.readFileSync('contract.js', 'utf-8')
+
+// create contract Src
+const cSrc = await arweave.createTransaction({ data: src })
+cSrc.addTag('Content-Type', 'application/javascript')
+cSrc.addTag('App-Name', 'SmartWeaveContractSource')
+cSrc.addTag('App-Version', '0.3.0')
+await arweave.transactions.sign(cSrc, jwk)
+await arweave.transactions.post(cSrc)
+
+// create image transaction
+const img = fs.readFileSync('../nft/dist/winston.svg', 'utf-8')
+const imgTx = await arweave.createTransaction({ data: img })
+imgTx.addTag('Content-Type', 'image/svg+xml')
+await arweave.transactions.sign(imgTx, jwk)
+await arweave.transactions.post(imgTx)
+
+// create html transaction
+const html = fs.readFileSync('../nft/dist/index.html', 'utf-8')
+const htmlTx = await arweave.createTransaction({ data: html })
+htmlTx.addTag('Content-Type', 'text/html')
+await arweave.transactions.sign(htmlTx, jwk)
+await arweave.transactions.post(htmlTx)
+
+// create contract
+const contract = await arweave.createTransaction({
+  data: JSON.stringify({
+    manifest: 'arweave/paths',
+    version: '0.1.0',
+    index: {
+      path: 'index.html'
+    },
+    paths: {
+      'index.html': {
+        id: `${htmlTx.id}`
+      },
+      'winston.svg': {
+        id: `${imgTx.id}`
+      }
+    }
+  })
+})
+contract.addTag('Content-Type', 'application/x.arweave-manifest+json')
+contract.addTag('Network', 'Koii') // Exchange to list NFT on Koii
+contract.addTag('Action', 'marketplace/Create')
+contract.addTag('App-Name', 'SmartWeaveContract')
+contract.addTag('App-Version', '0.3.1')
+contract.addTag('Contract-Src', cSrc.id)
+contract.addTag('NSFW', 'false')
+contract.addTag('Init-State', JSON.stringify({
+  owner: addr,
+  title: 'Winston',
+  description: 'Winston the mascot of Arweave who never forgets!',
+  name: 'Koii', // PST Name
+  ticker: 'KOINFT', // PST you want to associate with NFT
+  balances: {
+    [addr]: 1
+  },
+  locked: [],
+  contentType: 'text/html',
+  createdAt: Date.now(),
+  tags: [],
+  isPrivate: false,
+  visits: []
+}))
+
+await arweave.transactions.sign(contract, jwk)
+await arweave.transactions.post(contract)
+console.log('ContractId: ', contract.id)
 
 ```
 
@@ -119,7 +197,63 @@ warp/mint.js
 warp/contract.js
 
 ``` js
+const functions = { balance, transfer, visits, visit }
 
+export function handle(state, action) {
+  if (Object.keys(functions).includes(action.input.function)) {
+    return functions[action.input.function](state, action)
+  }
+  return ContractError('function not defined!')
+}
+
+function visits(state, action) {
+  return { result: state.visits.length }
+}
+
+function visit(state, action) {
+  const { caller } = action
+
+  if (!state.visits.includes(caller)) {
+    state.visits = [...state.visits, caller]
+  }
+  return { state }
+}
+
+function balance(state, action) {
+  const { input, caller } = action
+  let target = input.target ? input.target : caller;
+  const { ticker, balances } = state;
+  ContractAssert(
+    typeof target === 'string', 'Must specify target to retrieve balance for'
+  )
+  return {
+    result: {
+      target,
+      ticker,
+      balance: target in balances ? balances[target] : 0
+    }
+  }
+}
+
+function transfer(state, action) {
+  const { input, caller } = action
+  const { target, qty } = input
+  ContractAssert(target, 'No target specified')
+  ContractAssert(caller !== target, 'Invalid Token Transfer. ')
+  ContractAssert(qty, 'No quantity specified')
+  const { balances } = state
+  ContractAssert(
+    caller in balances && balances[caller] >= qty,
+    'Caller has insufficient funds'
+  )
+  balances[caller] -= qty
+  if (!(target in balances)) {
+    balances[target] = 0
+  }
+  balances[target] += qty
+  state.balances = balances
+  return { state }
+}
 ```
 
 ---
@@ -128,21 +262,158 @@ warp/contract.js
 
 nft/src/App.svelte
 
-``` js
+``` svelte
+<script>
+  import Arweave from "arweave";
+  import { onMount } from "svelte";
+  const arweave = Arweave.init({});
+  const CONTRACT = window.location.pathname.replace(/\//g, "");
+  const contract = warp.WarpWebFactory.memCachedBased(arweave)
+    .useArweaveGateway()
+    .build()
+    .contract(CONTRACT);
+  function visits() {
+    return contract.viewState({ function: "visits" }).then((res) => res.result);
+  }
+  async function doVisit() {
+    if (!sessionStorage.getItem("addr")) {
+      let wallet = await arweave.wallets.generate();
+      const addr = await arweave.wallets.jwkToAddress(wallet);
+      sessionStorage.setItem("addr", addr);
+      await arweave.api.get(`mint/${addr}/${arweave.ar.arToWinston("100")}`);
+      await contract.connect(wallet).writeInteraction({
+        function: "visit",
+      });
+      await arweave.api.get("mine");
+      total = visits();
+    }
+  }
+  onMount(doVisit);
+  let total = visits();
+</script>
 
+<svelte:head>
+  <title>Winston Dynamic NFT</title>
+</svelte:head>
+<div>
+  {#await total}
+    Loading...
+  {:then visits}
+    Number of unique visits: {visits}
+  {/await}
+</div>
+<img src="winston.svg" alt="winston" />
+
+<style>
+  div {
+    text-align: center;
+    margin-top: 8px;
+    margin-bottom: 8px;
+  }
+</style>
 
 ```
+
+nft/src/main.js
+
+``` js
+import App from './App2.svelte'
+
+const app = new App({
+  target: document.getElementById('app')
+})
+
+export default app
+```
+
+
+nft/index.html
+
+``` html
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link
+    href="data:image/x-icon;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQEAYAAABPYyMiAAAABmJLR0T///////8JWPfcAAAACXBIWXMAAABIAAAASABGyWs+AAAAF0lEQVRIx2NgGAWjYBSMglEwCkbBSAcACBAAAeaR9cIAAAAASUVORK5CYII="
+    rel="icon" type="image/x-icon" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Svelte + Vite App</title>
+  <script src="https://unpkg.com/warp-contracts@1.1.2/bundles/web.bundle.js"></script>
+</head>
+
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+
+</html>
+```
+
+Now that we have made these adjustments, we are ready to mint our nft on arlocal.
+
+``` sh
+cd nft
+yarn build
+cd ../warp
+node mint.js
+```
+
+Lets check it out:
+
+http://localhost:1984/{txid}
 
 --- 
 
 ### Adjust for mainnet
 
-warp/mint-prod.js
+Change Arweave config
 
-nft/src/App-prod.svelte
+warp/mint2.js
+
+``` js
+const arweave = Arweave.init({
+  host: 'arweave.net',
+  port: 443,
+  protocol: 'https'
+})
+```
+
+change Warp Config and doVisit function
+
+nft/src/App2.svelte
+
+``` js
+  const contract = warp.WarpWebFactory.memCached(arweave).contract(CONTRACT);
+
+  async function doVisit() {
+    if (!sessionStorage.getItem("addr")) {
+      let wallet = await arweave.wallets.generate();
+      const addr = await arweave.wallets.jwkToAddress(wallet);
+      sessionStorage.setItem("addr", addr);
+      await contract.connect(wallet).bundleInteraction({
+        function: "visit",
+      });
+      total = visits();
+    }
+  }
+```
+
+> NOTE: to mint nft to mainnet you will need a wallet with AR
+
+copy wallet.json with AR to the warp folder.
+
+``` sh
+cd nft
+yarn build
+cd ../warp
+node mint2.js
+```
 
 
 ---
 
 ### Summary
 
+This workshop demonstrates how to wrap a digital asset into a permaweb app into a warp contract. Then how to call the warp contract within your permaweb app to generate dyanmic functionality for your Atomic NFT.
