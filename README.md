@@ -1,4 +1,4 @@
-# Atomic NFTs (Dynamic)
+# Atomic NFTs (Dynamic) ⚛️
 
 Dynamic Atomic NFTs are powerful mechanisms that connect together three Arweave technologies, SmartWeave contracts, Atomic NFTs and the Permaweb.
 
@@ -47,7 +47,7 @@ Permanent **Data** + Decentralized **Fi**nalization = **DataFi**
 ![DataFi](https://fedzrgwlefkoztvkbdve3hkqeimokiowci6gyf63ojd3tfxcpi.arweave.net/KQeYmsshVOzOqgjqTZ1QIhjlIdYSPGwX23J_HuZbiek)
 
 
-## Atomic NFTs (Dynamic) Workshop
+## Atomic NFTs (Dynamic) Workshop ⚛️
 
 The NFT concept is about showing and transfering ownership of an item, to show ownership you have a token that shows the owner of a specific key pair (public/private) keys owns a specific (Digital) asset. 
 
@@ -95,16 +95,18 @@ arlocal
 
 ### Levelset
 
-In this project we have two folders: `nft` and `warp`
+In this project, we have two folders: `nft` and `warp`
 
-The `nft` folder contains a svelte app that compiles down to a single html file and holds our digital asset.
+The `nft` folder contains a svelte app that compiles to a single HTML file and holds our digital asset.
 The `warp` file contains our scripts to mint our Atomic NFT.
 
-Currently the project is configured to mint just the `svg` file that is located in the `nft/dist` folder.
+Currently, the project is configured to mint just the `svg` file in the `nft/dist` folder. In this workshop, we will modify the warp contract's deployment to deploy data of a permaweb app. 
 
 ---
 
 ### Modify `mint.js` to mint the html file 
+
+In our `mint.js` file, we will change the `data` input from a `svg` file to a `path.manifest.json` file. The `path.manifest.json` file will consist of two paths, `index.html` and `winston.svg`. The `index` path will point to `index.html`. So we need to modify the `mint.js` file to post the `index.html` and `winston.svg` files to Arweave, then change the `data` property in the `contract` transaction to be a `path.manifest.json` object. For more information about `path.manifest,` check out the schema here: https://github.com/ArweaveTeam/arweave/blob/master/doc/path-manifest-schema.md
 
 warp/mint.js
 
@@ -194,6 +196,8 @@ console.log('ContractId: ', contract.id)
 
 ### Modify the `contract.js` to add visits feature
 
+Let's add the visit feature to our SMART Contract code base. The visit feature will be a simple array of unique wallet addresses. We will add two methods. `visit`, which will take the `caller` and add if it does not already exist to the array of visits. `visits`, which will return the array's length for a total count of visitors of the NFT.
+
 warp/contract.js
 
 ``` js
@@ -258,7 +262,14 @@ function transfer(state, action) {
 
 ---
 
+Great Job! Now we are ready to make our NFT dynamic by adding the ability to track views using the NFT as a permaweb app.
+
 ### Modify the `App.svelte` to capture visits
+
+In the `App.svelte` file, we are going to add two functions, the `visits` function that calls the smart contact `visits` function via a `viewState` command, and the `doVisit` handler function that does the following:
+
+* checks sessionStorage for an existing wallet address
+* if not found create a wallet, and call the `writeInteraction` function to invoke the smart contract `visit` function.
 
 nft/src/App.svelte
 
@@ -268,9 +279,7 @@ nft/src/App.svelte
   import { onMount } from "svelte";
   const arweave = Arweave.init({});
   const CONTRACT = window.location.pathname.replace(/\//g, "");
-  const contract = warp.WarpWebFactory.memCachedBased(arweave)
-    .useArweaveGateway()
-    .build()
+  const contract = warp.WarpWebFactory.forTesting(arweave)
     .contract(CONTRACT);
   function visits() {
     return contract.viewState({ function: "visits" }).then((res) => res.result);
@@ -326,6 +335,7 @@ const app = new App({
 export default app
 ```
 
+We need to also include the `warp` bundle in the `index.html` file, so it is available when our application runs.
 
 nft/index.html
 
@@ -368,6 +378,8 @@ http://localhost:1984/{txid}
 
 ### Adjust for mainnet
 
+Great Job! We just deployed to arlocal (devnet), and we need to make some adjustments to deploy to arweave.net (mainnet). We need to change the target gateway in mint2.js.
+
 Change Arweave config
 
 warp/mint2.js
@@ -380,7 +392,7 @@ const arweave = Arweave.init({
 })
 ```
 
-change Warp Config and doVisit function
+We need to change Warp Config and doVisit function
 
 nft/src/App2.svelte
 
@@ -400,7 +412,7 @@ nft/src/App2.svelte
   }
 ```
 
-> NOTE: to mint nft to mainnet you will need a wallet with AR
+> NOTE: to mint nft on mainnet you will need a JSON wallet with AR
 
 copy wallet.json with AR to the warp folder.
 
@@ -411,9 +423,10 @@ cd ../warp
 node mint2.js
 ```
 
-
 ---
 
 ### Summary
 
 This workshop demonstrates how to wrap a digital asset into a permaweb app into a warp contract. Then how to call the warp contract within your permaweb app to generate dyanmic functionality for your Atomic NFT.
+
+✌️
